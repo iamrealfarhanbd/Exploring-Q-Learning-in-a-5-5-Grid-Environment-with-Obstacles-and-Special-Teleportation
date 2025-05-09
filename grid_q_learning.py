@@ -16,10 +16,10 @@ class GridWorld:
         self.obstacles = [(2, 2), (2, 3), (2, 4), (3, 2)]
 
         self.actions = {
-            0: (-1, 0),
-            1: (+1, 0),
-            2: (0, +1),
-            3: (0, -1)
+            0: (-1, 0), # Up
+            1: (+1, 0), # Down
+            2: (0, +1), # Right
+            3: (0, -1)  # Left
         }
         self.num_actions = len(self.actions)
 
@@ -36,14 +36,14 @@ class GridWorld:
 
         if current_pos == self.jump_start:
             self.pos = self.jump_dest
-            return self.pos, 5, True
+            return self.pos, 5, True # Reward for jump, ends episode
 
         dr, dc = self.actions[action]
         next_r, next_c = r + dr, c + dc
         next_pos = (next_r, next_c)
 
         if not (0 <= next_r < self.rows and 0 <= next_c < self.cols) or next_pos in self.obstacles:
-            next_pos = current_pos
+            next_pos = current_pos # Stay in current position if hit boundary or obstacle
 
         self.pos = next_pos
 
@@ -74,11 +74,13 @@ def run_experiment(alpha, max_episodes=100, early_stop_avg_reward=10, early_stop
     current_epsilon = epsilon
 
     for ep in range(1, max_episodes + 1):
+        # This block is important for ensuring that if early stopping occurs,
+        # the lists are padded to `max_episodes` length for consistent plotting.
         if stopped_early and len(rewards) < max_episodes:
             rewards.extend([rewards[-1]] * (max_episodes - len(rewards)))
             eps_history.extend([eps_history[-1]] * (max_episodes - len(eps_history)))
             avg_abs_td_errors.extend([avg_abs_td_errors[-1]] * (max_episodes - len(avg_abs_td_errors)))
-            break
+            break # Break the loop after padding
 
         state = env.reset()
         done = False
@@ -99,10 +101,10 @@ def run_experiment(alpha, max_episodes=100, early_stop_avg_reward=10, early_stop
             next_state, reward, done = env.step(action)
 
             next_state_row, next_state_col = next_state
-            max_future_q = np.max(Q[next_state_row, next_state_col, :])
+            max_future_q = np.max(Q[next_state_row, next_state_col, :]) # Max Q for next state
             td_target = reward + gamma * max_future_q
             td_error = td_target - old_q
-            Q[state[0], state[1], action] += alpha * td_error
+            Q[state[0], state[1], action] += alpha * td_error # Q-learning update
 
             episode_td_errors.append(abs(td_error))
 
@@ -113,17 +115,19 @@ def run_experiment(alpha, max_episodes=100, early_stop_avg_reward=10, early_stop
         eps_history.append(current_epsilon)
         avg_abs_td_errors.append(np.mean(episode_td_errors) if episode_td_errors else 0)
 
-        current_epsilon = max(epsilon_min, current_epsilon * epsilon_decay)
+        current_epsilon = max(epsilon_min, current_epsilon * epsilon_decay) # Epsilon decay
 
         recent_rewards.append(cum_r)
         if ep >= early_stop_window and np.mean(recent_rewards) > early_stop_avg_reward:
             print(f"Early stopping for alpha={alpha} at episode {ep} due to average reward exceeding {early_stop_avg_reward}")
             stopped_early = True
 
+        # Capture snapshots of the Q-table at specified episodes
         if ep in snapshot_episodes_list or ep == max_episodes or (stopped_early and ep < max_episodes):
-             if ep not in snapshots:
+             if ep not in snapshots: # Avoid re-saving if already captured by early stopping
                 snapshots[ep] = Q.copy()
 
+    # Ensure lists are exactly max_episodes long, even if early stopped
     while len(rewards) < max_episodes:
         rewards.append(rewards[-1])
         eps_history.append(eps_history[-1])
@@ -131,8 +135,8 @@ def run_experiment(alpha, max_episodes=100, early_stop_avg_reward=10, early_stop
 
     return Q, rewards, eps_history, avg_abs_td_errors, snapshots
 
-def plot_q_heatmap(q_table, env, title, vmin=None, vmax=None):
-    state_values = np.max(q_table, axis=2)
+def plot_q_heatmap(q_table, env, title, filename, vmin=None, vmax=None):
+    state_values = np.max(q_table, axis=2) # Get the maximum Q-value for each state
     rows, cols = env.rows, env.cols
 
     fig, ax = plt.subplots(figsize=(cols + 1, rows + 1))
@@ -146,21 +150,27 @@ def plot_q_heatmap(q_table, env, title, vmin=None, vmax=None):
     ax.set_yticklabels(np.arange(1, rows + 1))
     ax.grid(False)
 
+    # Draw grid lines
     for r in range(rows + 1):
         ax.axhline(r - 0.5, color='gray', lw=1)
     for c in range(cols + 1):
         ax.axvline(c - 0.5, color='gray', lw=1)
 
+    # Mark obstacles
     for obs_r, obs_c in env.obstacles:
         ax.add_patch(Rectangle((obs_c - 0.5, obs_r - 0.5), 1, 1, color='black', alpha=0.7, ec='gray'))
 
+    # Mark start state
     start_r, start_c = env.start
-    ax.add_patch(Circle((start_c, start_r), 0.35, color='red', zorder=5))
+    ax.add_patch(Circle((start_c, start_r), 0.35, color='red', zorder=5)) # Center of the cell is (c, r)
 
+    # Mark terminal state
     terminal_r, terminal_c = env.terminal
-    ax.add_patch(Rectangle((terminal_c - 0.5, terminal_c - 0.5), 1, 1, color='cyan', alpha=0.7, ec='gray'))
+    ax.add_patch(Rectangle((terminal_c - 0.5, terminal_r - 0.5), 1, 1, color='cyan', alpha=0.7, ec='gray'))
     ax.text(terminal_c, terminal_r, '★', ha='center', va='center', color='yellow', fontsize=16, weight='bold')
 
+
+    # Mark jump state and destination
     jump_start_r, jump_start_c = env.jump_start
     jump_dest_r, jump_dest_c = env.jump_dest
     ax.add_patch(FancyArrowPatch((jump_start_c, jump_start_r), (jump_dest_c, jump_dest_r),
@@ -168,16 +178,18 @@ def plot_q_heatmap(q_table, env, title, vmin=None, vmax=None):
                                          mutation_scale=20, lw=2, color='magenta', zorder=5))
     ax.text(jump_start_c + 0.3, jump_start_r - 0.3, '+5', ha='left', va='bottom', color='purple', fontsize=10, weight='bold')
 
+
     ax.set_aspect('equal', adjustable='box')
     plt.tight_layout()
-    plt.show()
+    plt.savefig(filename)
+    plt.close(fig) # Close the figure after saving to prevent display
 
-def plot_policy_map(Q, env, title):
-    best_actions = np.argmax(Q, axis=2)
+def plot_policy_map(Q, env, title, filename):
+    best_actions = np.argmax(Q, axis=2) # Get the index of the best action for each state
     rows, cols = env.rows, env.cols
 
     fig, ax = plt.subplots(figsize=(cols + 1, rows + 1))
-    ax.imshow(np.ones((rows, cols)), cmap='gray', origin='upper', vmin=0, vmax=1)
+    ax.imshow(np.ones((rows, cols)), cmap='gray', origin='upper', vmin=0, vmax=1) # Background
     ax.set_title(title)
 
     ax.set_xticks(np.arange(cols))
@@ -186,16 +198,17 @@ def plot_policy_map(Q, env, title):
     ax.set_yticklabels(np.arange(1, rows + 1))
     ax.grid(False)
 
+    # Draw grid lines
     for r in range(rows + 1):
         ax.axhline(r - 0.5, color='gray', lw=1)
     for c in range(cols + 1):
         ax.axvline(c - 0.5, color='gray', lw=1)
 
-    action_arrows = {
-        0: '^',
-        1: 'v',
-        2: '>',
-        3: '<'
+    action_arrows = { # Unicode arrows for directions
+        0: '↑', # Up
+        1: '↓', # Down
+        2: '→', # Right
+        3: '←'  # Left
     }
 
     for r in range(rows):
@@ -219,18 +232,21 @@ def plot_policy_map(Q, env, title):
                 arrow = action_arrows[best_actions[r, c]]
                 plt.text(c, r, arrow, ha='center', va='center', color='blue', fontsize=12, weight='bold')
 
+    # Mark jump state and destination with arrow
     jump_start_r, jump_start_c = env.jump_start
     jump_dest_r, jump_dest_c = env.jump_dest
     ax.add_patch(FancyArrowPatch((jump_start_c, jump_start_r), (jump_dest_c, jump_dest_r),
                                          connectionstyle="arc3,rad=0.3", arrowstyle="-|>",
                                          mutation_scale=20, lw=2, color='magenta', zorder=5))
-    ax.text(jump_dest_c + 0.3, jump_dest_r + 0.3, '+5', ha='left', va='top', color='purple', fontsize=10, weight='bold')
+    ax.text(jump_dest_c + 0.3, jump_dest_r + 0.3, '+5', ha='left', va='top', color='purple', fontsize=10, weight='bold') # Reward label
+
 
     ax.set_aspect('equal', adjustable='box')
     plt.tight_layout()
-    plt.show()
+    plt.savefig(filename)
+    plt.close(fig) # Close the figure after saving to prevent display
 
-def plot_cumulative_reward(episode_rewards_dict, title):
+def plot_cumulative_reward(episode_rewards_dict, title, filename):
     plt.figure(figsize=(10, 6))
     for alpha, rewards in episode_rewards_dict.items():
         plt.plot(range(1, len(rewards) + 1), rewards, label=f'α={alpha}')
@@ -240,9 +256,10 @@ def plot_cumulative_reward(episode_rewards_dict, title):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(filename)
+    plt.close()
 
-def plot_epsilon_decay(epsilon_values, title):
+def plot_epsilon_decay(epsilon_values, title, filename):
     plt.figure(figsize=(10, 6))
     plt.plot(range(1, len(epsilon_values) + 1), epsilon_values)
     plt.xlabel('Episode')
@@ -250,9 +267,10 @@ def plot_epsilon_decay(epsilon_values, title):
     plt.title(title)
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(filename)
+    plt.close()
 
-def plot_average_td_error(avg_td_errors_dict, title):
+def plot_average_td_error(avg_td_errors_dict, title, filename):
      plt.figure(figsize=(10, 6))
      for alpha, errors in avg_td_errors_dict.items():
          plt.plot(range(1, len(errors) + 1), errors, label=f'α={alpha}')
@@ -262,9 +280,10 @@ def plot_average_td_error(avg_td_errors_dict, title):
      plt.legend()
      plt.grid(True)
      plt.tight_layout()
-     plt.show()
+     plt.savefig(filename)
+     plt.close()
 
-def plot_average_final_reward_bar_chart(learning_rates, average_rewards, title, early_stop_window):
+def plot_average_final_reward_bar_chart(learning_rates, average_rewards, title, early_stop_window, filename):
     plt.figure(figsize=(8, 6))
     bars = plt.bar([str(lr) for lr in learning_rates], average_rewards, color=['blue', 'green', 'red'])
     plt.xlabel('Learning Rate (α)')
@@ -277,7 +296,8 @@ def plot_average_final_reward_bar_chart(learning_rates, average_rewards, title, 
         plt.text(bar.get_x() + bar.get_width()/2.0, yval, f'{yval:.2f}', va='bottom', ha='center')
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig(filename)
+    plt.close()
 
 if __name__ == "__main__":
     env = GridWorld()
@@ -292,6 +312,15 @@ if __name__ == "__main__":
 
     v_max_q = 10.0
     v_min_q = -10.0
+
+    # Create results directory if it doesn't exist
+    results_dir = "results"
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+        print(f"Created directory: {results_dir}")
+    else:
+        print(f"Directory already exists: {results_dir}")
+
 
     all_average_final_rewards = []
     for alpha in learning_rates:
@@ -317,7 +346,7 @@ if __name__ == "__main__":
         if actual_episodes_run >= early_stop_window:
              avg_final_reward = np.mean(rewards[actual_episodes_run - early_stop_window : actual_episodes_run])
         else:
-             avg_final_reward = np.mean(rewards)
+             avg_final_reward = np.mean(rewards) # If fewer episodes than window, average all available
 
         all_average_final_rewards.append(avg_final_reward)
         print(f"Finished alpha={alpha}. Actual episodes run: {actual_episodes_run}. Average reward over final period: {avg_final_reward:.2f}")
@@ -325,35 +354,41 @@ if __name__ == "__main__":
     print("\nGenerating plots...")
 
     plot_cumulative_reward({alpha: res['rewards'] for alpha, res in results.items()},
-                              'Cumulative Reward vs Episode for Different Learning Rates')
+                              'Cumulative Reward vs Episode for Different Learning Rates',
+                              os.path.join(results_dir, 'cumulative_reward.png'))
 
-    first_alpha = learning_rates[0]
+    first_alpha = learning_rates[0] # Epsilon decay is the same for all runs
     plot_epsilon_decay(results[first_alpha]['eps_history'],
-                       'Epsilon ($\epsilon$) Decay Schedule over Episodes')
+                       'Epsilon ($\epsilon$) Decay Schedule over Episodes',
+                       os.path.join(results_dir, 'epsilon_decay.png'))
 
     plot_average_td_error({alpha: res['avg_td_errors'] for alpha, res in results.items()},
-                          'Average Absolute TD Error vs Episode for Different Learning Rates')
+                          'Average Absolute TD Error vs Episode for Different Learning Rates',
+                          os.path.join(results_dir, 'average_td_error.png'))
 
     plot_average_final_reward_bar_chart(learning_rates, all_average_final_rewards,
                                         f'Average Cumulative Reward by Learning Rate (Last {early_stop_window} Episodes)',
-                                        early_stop_window)
+                                        early_stop_window,
+                                        os.path.join(results_dir, 'average_final_reward_bar_chart.png'))
 
     all_snapshot_episodes = sorted(list(set([ep for alpha_results in results.values() for ep in alpha_results['snapshots'].keys()])))
 
     print("\nGenerating Q-Table and Policy snapshot plots...")
     for alpha in learning_rates:
          print(f"  For alpha = {alpha}:")
-         sorted_snapshots = sorted(results[alpha]['snapshots'].items())
+         sorted_snapshots = sorted(results[alpha]['snapshots'].items()) # Ensure snapshots are processed in order
 
          for episode, Q_snap in sorted_snapshots:
              print(f"    Plotting snapshot for Episode {episode}")
-             temp_env = GridWorld()
+             temp_env = GridWorld() # Re-initialize env to ensure clean slate for plotting (though not strictly necessary here)
 
              plot_q_heatmap(Q_snap, temp_env,
                             f'Q-Table Heatmap: α = {alpha}, Episode {episode}',
+                            os.path.join(results_dir, f'q_heatmap_alpha{str(alpha).replace(".", "_")}_ep{episode}.png'),
                             vmin=v_min_q, vmax=v_max_q)
 
              plot_policy_map(Q_snap, temp_env,
-                             f'Greedy Policy Map: α = {alpha}, Episode {episode}')
+                             f'Greedy Policy Map: α = {alpha}, Episode {episode}',
+                             os.path.join(results_dir, f'policy_map_alpha{str(alpha).replace(".", "_")}_ep{episode}.png'))
 
-    print("\nAll plots generated and displayed.❤️")
+    print("\nAll plots generated and saved in the 'results' folder.❤️")
